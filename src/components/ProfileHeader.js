@@ -1,5 +1,5 @@
 import React from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { APP_NAME } from '../constants';
@@ -30,7 +30,14 @@ export function ProfileHeader({
 
       <View style={styles.profileRow}>
         <View style={styles.avatarWrap}>
-          <Image source={{ uri: imageUrl || PLACEHOLDER }} style={styles.avatar} />
+          <OptimizedImage
+            uri={imageUrl}
+            width={164}
+            height={164}
+            style={styles.avatar}
+            contentFit="cover"
+            priority="low"
+          />
           <Pressable onPress={onEditImage} style={styles.editPill}>
             <Ionicons name="camera-outline" size={14} color={colors.surface} />
           </Pressable>

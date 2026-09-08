@@ -1,0 +1,47 @@
+# EAS only needs the Expo app — exclude backend/tooling and heavy deps.
+# Without this, a broken nested node_modules path can fail archive upload.
+
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Firebase Cloud Functions (not part of the mobile app)
+functions/
+
+# Separate Vercel notify service
+notification-server/
+
+# Expo / native caches
+.expo/
+dist/
+web-build/
+.kotlin/
+ios/
+android/
+
+# Git / IDE / OS
+.git/
+.vscode/
+.idea/
+**/.DS_Store
+**/desktop.ini
+Thumbs.db
+
+# Env / secrets / logs
+.env
+.env.*
+!.env.example
+*.log
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# Misc
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.tsbuildinfo
+expo-env.d.ts
+.metro-health-check*

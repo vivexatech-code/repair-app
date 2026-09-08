@@ -1,19 +1,36 @@
 import React from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors } from '../constants/colors';
 import { radius, shadows, spacing } from '../constants/spacing';
-
-const PLACEHOLDER =
-  'https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=400&q=80';
+import { typography } from '../constants/typography';
+import { OptimizedImage } from './OptimizedImage';
+import { getServicePriceListLabel } from '../utils/serviceVariations';
 
 export function ServiceCard({ service, onPress }) {
-  const uri = service.imageUrl || PLACEHOLDER;
+  const uri = service.imageUrl || service.image || null;
+  const duration = Number(service.duration || 0);
+  const priceLabel = getServicePriceListLabel(service);
+  const varCount = Array.isArray(service.variations) ? service.variations.length : 0;
+  const showVarHint = service.hasVariations === true && varCount > 0;
+
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [styles.card, pressed && styles.pressed]}
+      accessibilityRole="button"
+      accessibilityLabel={`${service.name || 'Service'} details`}
+      style={({ pressed }) => [
+        styles.card,
+        pressed && styles.pressed,
+      ]}
     >
-      <Image source={{ uri }} style={styles.image} />
+      <OptimizedImage
+        uri={uri}
+        width={192}
+        height={192}
+        borderRadius={16}
+        style={styles.image}
+        priority="high"
+      />
       <View style={styles.body}>
         <Text style={styles.name} numberOfLines={2}>
           {service.name}
@@ -21,9 +38,14 @@ export function ServiceCard({ service, onPress }) {
         <Text style={styles.meta} numberOfLines={2}>
           {service.description}
         </Text>
+        {showVarHint ? (
+          <Text style={styles.optionHint}>{varCount} options</Text>
+        ) : null}
         <View style={styles.row}>
-          <Text style={styles.price}>₹{Number(service.price || 0)}</Text>
-          <Text style={styles.duration}>{service.duration} min</Text>
+          <Text style={styles.price} numberOfLines={1}>
+            {priceLabel}
+          </Text>
+          <Text style={styles.duration}>{duration} min</Text>
         </View>
       </View>
     </Pressable>
@@ -34,47 +56,82 @@ const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
     backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    overflow: 'hidden',
+    borderRadius: radius.lg + 4,
     marginBottom: spacing.md,
-    ...shadows.card,
+    overflow: 'hidden',
+
+    // Better depth
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 4,
+
+    // subtle border for premium feel
+    borderWidth: 1,
+    borderColor: colors.border,
   },
+
   pressed: {
-    opacity: 0.92,
+    opacity: 0.96,
+    transform: [{ scale: 0.985 }],
   },
+
   image: {
-    width: 96,
-    height: 96,
-    backgroundColor: colors.border,
+    width: 100,
+    height: 100,
+    borderRadius: 16,
+    margin: spacing.md,
+    backgroundColor: colors.surfaceVariant,
   },
+
   body: {
     flex: 1,
-    padding: spacing.md,
-    justifyContent: 'center',
+    paddingVertical: spacing.md,
+    paddingRight: spacing.md,
+    justifyContent: 'space-between',
   },
+
   name: {
-    fontSize: 16,
-    fontWeight: '700',
+    ...typography.title,
     color: colors.text,
-    marginBottom: 4,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+    marginBottom: 2,
   },
+
   meta: {
-    fontSize: 13,
+    ...typography.caption,
     color: colors.textSecondary,
     marginBottom: spacing.sm,
   },
+
+  optionHint: {
+    ...typography.caption,
+    fontWeight: '600',
+    color: colors.primary,
+    backgroundColor: colors.primary + '15', // soft tint
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    alignSelf: 'flex-start',
+    marginBottom: 6,
+  },
+
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+
   price: {
-    fontSize: 15,
-    fontWeight: '700',
+    ...typography.title,
     color: colors.primary,
+    fontWeight: '700',
   },
+
   duration: {
-    fontSize: 13,
+    ...typography.caption,
     color: colors.textSecondary,
   },
 });

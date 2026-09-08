@@ -4,25 +4,38 @@ import {
   Text,
   View,
   ScrollView,
-  ImageBackground,
   TouchableOpacity,
   Platform,
   StatusBar,
   useWindowDimensions,
   TextInput,
   RefreshControl,
-  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useRotatingSearchPlaceholder } from '../../hooks/useRotatingSearchPlaceholder';
 
 // Original Hooks & Contexts
 import { SERVICE_STATUS } from '../../constants';
 import { useAllServices } from '../../hooks/useAllServices';
+import { SkeletonLoader } from '../../components/SkeletonLoader';
+import { OptimizedImage } from '../../components/OptimizedImage';
+import { ScreenContainer } from '../../components/ScreenContainer';
+import { SectionPromoBanner } from '../../components/SectionPromoBanner';
+import { getServicePriceBounds, getServicePriceListLabel } from '../../utils/serviceVariations';
 
-// Local theme object to replicate the target design's aesthetic
+function serviceMatchesPriceFilter(service, filterId) {
+  if (filterId === 'all') return true;
+  if (filterId === 'active') return true;
+  const { min, max } = getServicePriceBounds(service);
+  if (min <= 0 && max <= 0) return false;
+  if (filterId === 'under300') return min < 300;
+  if (filterId === 'mid') return max >= 300 && min <= 600;
+  if (filterId === 'high') return max > 600;
+  return true;
+}
 const theme = {
   surface: '#FFFFFF',
   surfaceLowest: '#FFFFFF',
@@ -30,7 +43,7 @@ const theme = {
   surfaceHigh: '#EAECEE',
   onSurface: '#1A1C1E',
   onSurfaceVariant: '#6C7278',
-  primary: '#FF5700',
+  primary: '#C45508',
   primaryContainer: '#FF8A50',
 };
 
@@ -50,38 +63,39 @@ export function ServicesScreen() {
   
   const { services, loading, error, refresh } = useAllServices();
   const [query, setQuery] = useState('');
+  const [searchFocused, setSearchFocused] = useState(false);
+  const searchPlaceholder = useRotatingSearchPlaceholder(
+    searchFocused || Boolean(query.trim()),
+  );
   const [filter, setFilter] = useState('all');
 
   // Original Filtering Logic Preserved
   const filtered = useMemo(() => {
-    let rows = services || [];
+    let rows = Array.isArray(services) ? services : [];
     const q = query.trim().toLowerCase();
-    
+
     if (q) {
       rows = rows.filter(
         (s) =>
-          (s.name || '').toLowerCase().includes(q) ||
-          (s.description || '').toLowerCase().includes(q)
+          s != null &&
+          ((s.name || '').toLowerCase().includes(q) ||
+            (s.description || '').toLowerCase().includes(q)),
       );
     }
-    
+
     if (filter === 'active') {
       rows = rows.filter((s) => s.status === SERVICE_STATUS.ACTIVE);
-    } else if (filter === 'under300') {
-      rows = rows.filter((s) => Number(s.price || 0) < 300);
-    } else if (filter === 'mid') {
-      rows = rows.filter((s) => {
-        const p = Number(s.price || 0);
-        return p >= 300 && p <= 600;
-      });
-    } else if (filter === 'high') {
-      rows = rows.filter((s) => Number(s.price || 0) > 600);
+    } else if (filter === 'under300' || filter === 'mid' || filter === 'high') {
+      rows = rows.filter((s) => serviceMatchesPriceFilter(s, filter));
     }
     return rows;
   }, [services, query, filter]);
 
+  const hasCatalogRows = Array.isArray(services) && services.length > 0;
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
+      <ScreenContainer style={styles.screenInner}>
       <StatusBar barStyle="dark-content" backgroundColor={theme.surface} />
 
       {/* Header */}
@@ -110,9 +124,11 @@ export function ServicesScreen() {
             <Text style={styles.heroTitleHighlight}>your sanctuary.</Text>
           </Text>
           <Text style={styles.heroSubtitle}>
-            Experience the gold standard in home appliance maintenance. Our technicians blend technical precision with the white-glove service of a luxury atelier.
+            Experience the gold standard in home appliance maintenance. Our partners blend technical precision with the white-glove service of a luxury atelier.
           </Text>
         </View>
+
+        <SectionPromoBanner section="services" />
 
         {/* Search Bar (Adapted from original logic to match new UI) */}
         <View style={styles.searchContainer}>
@@ -120,9 +136,20 @@ export function ServicesScreen() {
           <TextInput
             value={query}
             onChangeText={setQuery}
-            placeholder="Search for any service..."
+            placeholder={
+              searchFocused || query.trim()
+                ? 'Search for any service...'
+                : searchPlaceholder
+            }
             placeholderTextColor={theme.onSurfaceVariant}
             style={styles.searchInput}
+            returnKeyType="search"
+            onFocus={() => setSearchFocused(true)}
+            onBlur={() => setSearchFocused(false)}
+            onSubmitEditing={() => {
+              const q = query.trim();
+              if (q) navigation.navigate('SearchResults', { query: q });
+            }}
           />
         </View>
 
@@ -145,10 +172,13 @@ export function ServicesScreen() {
 
         {/* Detailed Service Cards Grid */}
         <View style={styles.cardsGrid}>
-          {loading && filtered.length === 0 ? (
+          {loading && !hasCatalogRows ? (
              <View style={styles.loadingState}>
-               <ActivityIndicator size="large" color={theme.primary} />
-               <Text style={styles.loadingText}>Loading services...</Text>
+               {[1, 2, 3, 4].map((item) => (
+                 <View key={item} style={{ width: isTablet ? '48%' : '100%', marginBottom: 20 }}>
+                   <ServiceCardLoadingSkeleton />
+                 </View>
+               ))}
              </View>
           ) : filtered.length > 0 ? (
             filtered.map((service) => (
@@ -160,11 +190,18 @@ export function ServicesScreen() {
               >
                 <DetailedServiceCard
                   isTablet={isTablet}
-                  image={service.image || "https://images.unsplash.com/photo-1581578731548-c64695cc6952?q=80&w=800&auto=format&fit=crop"} // Fallback image
+                  image={service.imageUrl || service.image}
                   icon="build" // Fallback icon
                   category={service.category || "Maintenance"}
                   title={service.name || "Service"}
-                  price={`₹${service.price || 0}`}
+                  price={getServicePriceListLabel(service)}
+                  optionCount={
+                    service.hasVariations &&
+                    Array.isArray(service.variations) &&
+                    service.variations.length > 0
+                      ? service.variations.length
+                      : 0
+                  }
                   desc={service.description || "Expert service for your home appliances."}
                 />
               </TouchableOpacity>
@@ -179,6 +216,7 @@ export function ServicesScreen() {
           )}
         </View>
       </ScrollView>
+      </ScreenContainer>
     </SafeAreaView>
   );
 }
@@ -204,10 +242,26 @@ const DetailedServiceCard = ({
   category,
   title,
   price,
+  optionCount = 0,
   desc,
 }) => (
   <View style={styles.detailedCard}>
-    <ImageBackground source={{ uri: image }} style={styles.cardImage}>
+    <View style={styles.cardImage}>
+      {image ? (
+        <OptimizedImage
+          uri={image}
+          width={800}
+          height={400}
+          style={StyleSheet.absoluteFillObject}
+          contentFit="cover"
+          priority="normal"
+        />
+      ) : (
+        <LinearGradient
+          colors={[theme.surfaceHigh, theme.surfaceLow]}
+          style={StyleSheet.absoluteFillObject}
+        />
+      )}
       <LinearGradient
         colors={["rgba(0,0,0,0.3)", "transparent"]}
         style={styles.cardGradient}
@@ -217,15 +271,18 @@ const DetailedServiceCard = ({
           <Text style={styles.cardBadgeText}>{category}</Text>
         </View>
       </LinearGradient>
-    </ImageBackground>
+    </View>
 
     <View style={styles.cardContent}>
       <View style={styles.cardHeaderInfo}>
         <Text style={styles.cardTitle} numberOfLines={1}>{title}</Text>
         <View style={styles.pricePill}>
-          <Text style={styles.priceText}>{price}</Text>
+          <Text style={styles.priceText} numberOfLines={1}>{price}</Text>
         </View>
       </View>
+      {optionCount > 0 ? (
+        <Text style={styles.cardOptionHint}>{optionCount} options</Text>
+      ) : null}
       
       <Text style={styles.cardDesc} numberOfLines={2}>{desc}</Text>
       
@@ -243,6 +300,19 @@ const DetailedServiceCard = ({
   </View>
 );
 
+const ServiceCardLoadingSkeleton = () => (
+  <View style={styles.detailedCard}>
+    <SkeletonLoader height={220} borderRadius={24} />
+    <View style={styles.cardContent}>
+      <SkeletonLoader height={18} width="70%" />
+      <SkeletonLoader height={14} width="40%" style={{ marginTop: 10 }} />
+      <SkeletonLoader height={12} width="100%" style={{ marginTop: 12 }} />
+      <SkeletonLoader height={12} width="85%" style={{ marginTop: 8 }} />
+      <SkeletonLoader height={48} borderRadius={16} style={{ marginTop: 20 }} />
+    </View>
+  </View>
+);
+
 // --- Styles ---
 
 const styles = StyleSheet.create({
@@ -250,6 +320,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: theme.surface,
     // paddingTop: Platform.OS === "android" ? StatusBar.currentHeight : 0,
+  },
+  screenInner: {
+    flex: 1,
   },
   header: {
     flexDirection: "row",
@@ -293,19 +366,19 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   heroTitle: {
-    fontSize: 40,
+    fontSize: 34,
     fontWeight: "900",
     color: theme.onSurface,
-    lineHeight: 44,
+    lineHeight: 38,
     marginBottom: 12,
   },
   heroTitleHighlight: {
     color: theme.primary,
   },
   heroSubtitle: {
-    fontSize: 15,
+    fontSize: 14,
     color: theme.onSurfaceVariant,
-    lineHeight: 22,
+    lineHeight: 20,
     maxWidth: "95%",
   },
   searchContainer: {
@@ -339,9 +412,9 @@ const styles = StyleSheet.create({
   },
   filtersScroll: {
     paddingHorizontal: 20,
-    gap: 12,
   },
   filterPill: {
+    marginRight: 12,
     paddingHorizontal: 20,
     paddingVertical: 10,
     backgroundColor: theme.surfaceLowest,
@@ -385,15 +458,7 @@ const styles = StyleSheet.create({
   },
   loadingState: {
     width: "100%",
-    paddingVertical: 40,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 15,
-    color: theme.onSurfaceVariant,
-    fontWeight: "500",
+    paddingVertical: 8,
   },
   detailedCard: {
     backgroundColor: theme.surfaceLowest,
@@ -411,9 +476,11 @@ const styles = StyleSheet.create({
   cardImage: {
     height: 220,
     width: "100%",
+    position: "relative",
+    overflow: "hidden",
   },
   cardGradient: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
     padding: 16,
   },
   cardBadge: {
@@ -424,9 +491,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
-    gap: 6,
   },
   cardBadgeText: {
+    marginLeft: 6,
     fontSize: 10,
     fontWeight: "bold",
     color: theme.onSurface,
@@ -443,7 +510,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   cardTitle: {
-    fontSize: 20, // Slightly smaller to accommodate pricing pill
+    fontSize: 18, // Slightly smaller to avoid clipping
     fontWeight: "900",
     color: theme.onSurface,
     flex: 1,
@@ -459,6 +526,14 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "900",
     color: theme.primary,
+    maxWidth: 140,
+  },
+  cardOptionHint: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: theme.onSurfaceVariant,
+    marginBottom: 10,
+    marginTop: -4,
   },
   cardDesc: {
     fontSize: 13,

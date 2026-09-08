@@ -1,32 +1,46 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
-  Linking,
   ScrollView,
   StyleSheet,
   Text,
   View,
   Image,
   TouchableOpacity,
-  SafeAreaView,
   Platform,
   StatusBar,
   useWindowDimensions,
   TextInput,
-  ActivityIndicator,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useNavigation } from '@react-navigation/native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 // Original context and services
 import { APP_NAME } from '../../constants';
 import { useAuth } from '../../context/AuthContext';
 import {
+  useAppSettings,
+  FALLBACK_SUPPORT_PHONE,
+} from '../../context/AppSettingsContext';
+import {
   subscribeCustomerProfile,
   updateCustomerProfile,
 } from '../../services/customerService';
+import { SkeletonLoader } from '../../components/SkeletonLoader';
+import { uploadImageToCloudinary } from '../../services/mediaService';
+import { openSupportEmail } from '../../utils/supportEmail';
+import { openPhoneDialer } from '../../utils/phoneDial';
+import { ScreenContainer } from '../../components/ScreenContainer';
+import { SectionPromoBanner } from '../../components/SectionPromoBanner';
+import { useGuestBrowse } from '../../context/GuestBrowseContext';
+import { showAppToast } from '../../utils/appToast';
+import { Button } from '../../components/Button';
+import { Modal } from 'react-native';
+
+const APP_LOGO = require('../../../assets/icon.png');
 
 // Local theme object to replicate the target design's aesthetic
 const theme = {
@@ -36,7 +50,7 @@ const theme = {
   surfaceHigh: '#EAECEE',
   onSurface: '#1A1C1E',
   onSurfaceVariant: '#6C7278',
-  primary: '#FF5700',
+  primary: '#C45508',
   primaryContainer: '#FF8A3D',
   success: '#22c55e',
 };
@@ -47,12 +61,18 @@ export function AccountScreen() {
   
   const navigation = useNavigation();
   const { user, logout } = useAuth();
-  
+  const { resolvedSupportEmail, resolvedSupportPhone } = useAppSettings();
+  const { isGuestBrowse, promptLogin } = useGuestBrowse();
+
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [editingPhone, setEditingPhone] = useState(false);
-  const [phoneDraft, setPhoneDraft] = useState('');
-  const [savingPhone, setSavingPhone] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+  const [savingName, setSavingName] = useState(false);
+  const [editingEmail, setEditingEmail] = useState(false);
+  const [emailDraft, setEmailDraft] = useState('');
+  const [savingEmail, setSavingEmail] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
 
   useEffect(() => {
     if (!user?.uid) return undefined;
@@ -60,7 +80,8 @@ export function AccountScreen() {
       user.uid,
       (data) => {
         setProfile(data);
-        setPhoneDraft(data?.phone || '');
+        setNameDraft(data?.name || '');
+        setEmailDraft(data?.email || '');
         setLoading(false);
       },
       () => setLoading(false),
@@ -70,20 +91,53 @@ export function AccountScreen() {
 
   const bookingCount = profile?.totalBookings || 0;
   const savedAddressCount = useMemo(() => {
-    if (Array.isArray(profile?.savedAddresses)) return profile.savedAddresses.length;
-    return profile?.address ? 1 : 0;
-  }, [profile?.savedAddresses, profile?.address]);
+    const fromList = Array.isArray(profile?.addresses) ? profile.addresses.length : 0;
+    if (fromList > 0) return fromList;
+    const legacy = Array.isArray(profile?.savedAddresses)
+      ? profile.savedAddresses.length
+      : 0;
+    if (legacy > 0) return legacy;
+    const single = profile?.address != null && String(profile.address).trim() !== '';
+    return single ? 1 : 0;
+  }, [profile?.addresses, profile?.savedAddresses, profile?.address]);
 
-  const onSavePhone = async () => {
+  const onSaveName = async () => {
     if (!user?.uid) return;
-    setSavingPhone(true);
+    const trimmed = nameDraft.trim();
+    if (!trimmed) {
+      Alert.alert('Name required', 'Please enter your name.');
+      return;
+    }
+    setSavingName(true);
     try {
-      await updateCustomerProfile(user.uid, { phone: phoneDraft.trim() });
-      setEditingPhone(false);
+      await updateCustomerProfile(user.uid, { name: trimmed });
+      setProfile((prev) => ({ ...(prev || {}), name: trimmed }));
+      setEditingName(false);
+      showAppToast('Name saved');
     } catch (e) {
-      Alert.alert('Update failed', e?.message || 'Could not update phone number.');
+      Alert.alert('Update failed', e?.message || 'Could not update name.');
     } finally {
-      setSavingPhone(false);
+      setSavingName(false);
+    }
+  };
+
+  const onSaveEmail = async () => {
+    if (!user?.uid) return;
+    const trimmed = emailDraft.trim().toLowerCase();
+    if (trimmed && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+      Alert.alert('Invalid email', 'Enter a valid email for invoices, or leave it blank.');
+      return;
+    }
+    setSavingEmail(true);
+    try {
+      await updateCustomerProfile(user.uid, { email: trimmed });
+      setProfile((prev) => ({ ...(prev || {}), email: trimmed }));
+      setEditingEmail(false);
+      showAppToast(trimmed ? 'Email saved' : 'Email removed');
+    } catch (e) {
+      Alert.alert('Update failed', e?.message || 'Could not update email.');
+    } finally {
+      setSavingEmail(false);
     }
   };
 
@@ -94,37 +148,105 @@ export function AccountScreen() {
         Alert.alert('Permission needed', 'Allow photos to change profile image.');
         return;
       }
-      await ImagePicker.launchImageLibraryAsync({
+      const pick = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.7,
       });
-      Alert.alert('Coming soon', 'Profile image upload can be connected anytime.');
+      if (pick.canceled || !pick.assets?.[0]?.uri) return;
+      setUploadingImage(true);
+      const imageUrl = await uploadImageToCloudinary(pick.assets[0].uri);
+      if (!imageUrl) throw new Error('No image URL returned');
+      await updateCustomerProfile(user.uid, { photoURL: imageUrl });
+      setProfile((prev) => ({ ...(prev || {}), photoURL: imageUrl }));
     } catch {
-      Alert.alert('Unavailable', 'Image picker is not available right now.');
+      Alert.alert('Unavailable', 'Unable to upload profile image right now.');
+    } finally {
+      setUploadingImage(false);
     }
   };
 
+  if (!user && isGuestBrowse) {
+    return (
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <ScreenContainer style={styles.screenInner}>
+          <StatusBar barStyle="dark-content" backgroundColor={theme.surface} />
+          <View style={styles.header}>
+            <View style={styles.headerTitleRow}>
+              <MaterialIcons name="build" size={24} color={theme.primary} />
+              <Text style={styles.headerTitle}>{APP_NAME}</Text>
+            </View>
+          </View>
+          <View style={styles.guestBody}>
+            <Image source={APP_LOGO} style={styles.guestLogo} resizeMode="contain" />
+            <Text style={styles.guestTitle}>Sign in to manage your profile</Text>
+            <Text style={styles.guestSubtitle}>
+              You can browse services as a guest. Sign in to save addresses, book visits, and track
+              appointments.
+            </Text>
+            <Button title="Sign in" onPress={() => promptLogin()} />
+            <Text style={styles.guestHint}>
+              New here? Sign in with your mobile number and OTP. A customer profile is created automatically.
+            </Text>
+          </View>
+        </ScreenContainer>
+      </SafeAreaView>
+    );
+  }
+
+  const supportPhoneForDial = resolvedSupportPhone || FALLBACK_SUPPORT_PHONE;
+
   const supportItems = [
     {
-      id: 'chat',
-      title: 'Chat Support',
-      icon: 'chat',
-      onPress: () => navigation.navigate('SupportChat'),
+      id: 'tickets',
+      title: 'Help & Support',
+      icon: 'support-agent',
+      onPress: () => navigation.navigate('Support'),
+    },
+    {
+      id: 'notifications',
+      title: 'Notifications',
+      icon: 'notifications',
+      onPress: () => navigation.navigate('Notifications'),
+    },
+    {
+      id: 'email',
+      title: 'Email Support',
+      icon: 'email',
+      onPress: async () => {
+        const ok = await openSupportEmail({
+          userName: profile?.name,
+          userEmail: user?.email,
+          supportAddress: resolvedSupportEmail,
+        });
+        if (!ok) {
+          Alert.alert(
+            'Email unavailable',
+            `No mail app was found. Please email ${resolvedSupportEmail} from your browser.`,
+          );
+        }
+      },
     },
     {
       id: 'call',
       title: 'Call Support',
       icon: 'phone',
       onPress: async () => {
-        const url = 'tel:+911800000111';
-        const can = await Linking.canOpenURL(url);
-        if (!can) {
-          Alert.alert('Not available', 'Calling is unavailable on this device.');
-          return;
+        try {
+          const result = await openPhoneDialer(supportPhoneForDial);
+          if (!result?.ok) {
+            Alert.alert(
+              'Not available',
+              'Calling is unavailable on this device.',
+            );
+          }
+        } catch {
+          Alert.alert(
+            'Not available',
+            `Could not open the phone app. Please call ${supportPhoneForDial}.`,
+          );
         }
-        await Linking.openURL(url);
       },
     },
     {
@@ -148,7 +270,8 @@ export function AccountScreen() {
   ];
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
+      <ScreenContainer style={styles.screenInner}>
       <StatusBar barStyle="dark-content" backgroundColor={theme.surface} />
 
       {/* Header */}
@@ -173,14 +296,16 @@ export function AccountScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
+        <SectionPromoBanner section="account" />
+
         {/* Profile Section */}
         <View style={styles.profileSection}>
           <View style={styles.profileImageContainer}>
             <View style={styles.imageRing}>
               <Image
-                source={{
-                  uri: profile?.photoURL || "https://images.unsplash.com/photo-1633332755192-727a05c4013d?q=80&w=200&auto=format&fit=crop",
-                }}
+                source={
+                  profile?.photoURL ? { uri: profile.photoURL } : APP_LOGO
+                }
                 style={styles.profileImage}
               />
             </View>
@@ -193,13 +318,19 @@ export function AccountScreen() {
                 colors={[theme.primary, theme.primaryContainer]}
                 style={styles.editImageBtn}
               >
-                <MaterialIcons name="edit" size={18} color="#ffffff" />
+                {uploadingImage ? (
+                  <SkeletonLoader width={16} height={16} borderRadius={8} />
+                ) : (
+                  <MaterialIcons name="edit" size={18} color="#ffffff" />
+                )}
               </LinearGradient>
             </TouchableOpacity>
           </View>
 
           <View style={styles.profileInfo}>
-            <Text style={styles.profileName}>{profile?.name || 'User'}</Text>
+            <Text style={styles.profileName} numberOfLines={1}>
+              {profile?.name || 'User'}
+            </Text>
             <Text style={styles.profileSubtitle}>
               {profile?.email || user?.email || 'Premium Member'}
             </Text>
@@ -218,7 +349,9 @@ export function AccountScreen() {
         </View>
 
         {loading && (
-          <ActivityIndicator size="small" color={theme.primary} style={{ marginBottom: 20 }} />
+          <View style={styles.profileLoading}>
+            <SkeletonLoader width={140} height={14} borderRadius={999} />
+          </View>
         )}
 
         {/* Info Cards Grid */}
@@ -236,42 +369,40 @@ export function AccountScreen() {
               />
             </View>
 
-            <InfoRow
-              label="EMAIL ADDRESS"
-              value={profile?.email || user?.email || 'Not set'}
-              icon="mail"
-            />
-            <View style={styles.divider} />
-            
-            {editingPhone ? (
+            {editingName ? (
               <View style={styles.editPhoneContainer}>
-                <Text style={styles.infoLabel}>PHONE NUMBER</Text>
+                <Text style={styles.infoLabel}>FULL NAME</Text>
                 <View style={styles.phoneInputRow}>
                   <TextInput
                     style={styles.phoneInput}
-                    value={phoneDraft}
-                    onChangeText={setPhoneDraft}
-                    keyboardType="phone-pad"
-                    placeholder="Enter phone number"
+                    value={nameDraft}
+                    onChangeText={setNameDraft}
+                    placeholder="Your name"
                     placeholderTextColor={theme.onSurfaceVariant}
+                    autoCapitalize="words"
                     autoFocus
                   />
-                  <TouchableOpacity 
-                    style={styles.savePhoneBtn} 
-                    onPress={onSavePhone}
-                    disabled={savingPhone}
+                  <TouchableOpacity
+                    style={styles.savePhoneBtn}
+                    onPress={onSaveName}
+                    disabled={savingName}
                   >
-                    {savingPhone ? (
-                      <ActivityIndicator size="small" color="#fff" />
+                    {savingName ? (
+                      <SkeletonLoader
+                        width={16}
+                        height={16}
+                        borderRadius={8}
+                        style={styles.phoneSaveLoading}
+                      />
                     ) : (
                       <MaterialIcons name="check" size={20} color="#fff" />
                     )}
                   </TouchableOpacity>
-                  <TouchableOpacity 
-                    style={styles.cancelPhoneBtn} 
+                  <TouchableOpacity
+                    style={styles.cancelPhoneBtn}
                     onPress={() => {
-                      setEditingPhone(false);
-                      setPhoneDraft(profile?.phone || '');
+                      setEditingName(false);
+                      setNameDraft(profile?.name || '');
                     }}
                   >
                     <MaterialIcons name="close" size={20} color={theme.onSurfaceVariant} />
@@ -279,13 +410,70 @@ export function AccountScreen() {
                 </View>
               </View>
             ) : (
-              <InfoRow 
-                label="PHONE NUMBER" 
-                value={profile?.phone || 'Not set'} 
-                icon="edit" 
-                onPress={() => setEditingPhone(true)}
+              <InfoRow
+                label="FULL NAME"
+                value={profile?.name || 'Not set'}
+                icon="edit"
+                onPress={() => setEditingName(true)}
               />
             )}
+            <View style={styles.divider} />
+
+            {editingEmail ? (
+              <View style={styles.editPhoneContainer}>
+                <Text style={styles.infoLabel}>EMAIL ADDRESS</Text>
+                <View style={styles.phoneInputRow}>
+                  <TextInput
+                    style={styles.phoneInput}
+                    value={emailDraft}
+                    onChangeText={setEmailDraft}
+                    placeholder="For invoices (optional)"
+                    placeholderTextColor={theme.onSurfaceVariant}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    autoFocus
+                  />
+                  <TouchableOpacity
+                    style={styles.savePhoneBtn}
+                    onPress={onSaveEmail}
+                    disabled={savingEmail}
+                  >
+                    {savingEmail ? (
+                      <SkeletonLoader
+                        width={16}
+                        height={16}
+                        borderRadius={8}
+                        style={styles.phoneSaveLoading}
+                      />
+                    ) : (
+                      <MaterialIcons name="check" size={20} color="#fff" />
+                    )}
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.cancelPhoneBtn}
+                    onPress={() => {
+                      setEditingEmail(false);
+                      setEmailDraft(profile?.email || '');
+                    }}
+                  >
+                    <MaterialIcons name="close" size={20} color={theme.onSurfaceVariant} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <InfoRow
+                label="EMAIL ADDRESS"
+                value={profile?.email || user?.email || 'Not set'}
+                icon="edit"
+                onPress={() => setEditingEmail(true)}
+              />
+            )}
+            <View style={styles.divider} />
+            
+            <InfoRow
+              label="PHONE NUMBER"
+              value={profile?.phone || user?.phoneNumber || 'Not set'}
+            />
           </View>
 
           {/* Address Book */}
@@ -304,14 +492,24 @@ export function AccountScreen() {
               label="SAVED LOCATIONS"
               value={`${savedAddressCount} Address(es)`}
               icon="chevron-right"
-              onPress={() => navigation.navigate('Address')}
+              onPress={() => {
+                if (!user) {
+                  promptLogin({ name: 'AddressList', params: { manageOnly: true } });
+                  return;
+                }
+                navigation.navigate('AddressList', {
+                  manageOnly: true,
+                  addresses: Array.isArray(profile?.addresses) ? profile.addresses : [],
+                });
+              }}
             />
             <View style={styles.divider} />
             <InfoRow
-              label="CURRENT PRIMARY"
+              label="CURRENT LOCATION"
               value={profile?.address || "Not set"}
               icon="map"
               valueSpacing={false}
+              multiline
             />
           </View>
 
@@ -342,12 +540,7 @@ export function AccountScreen() {
         {/* Footer Info */}
         <View style={styles.footer}>
           <View style={styles.logoContainer}>
-            <LinearGradient
-              colors={["#FF5700", theme.primaryContainer]}
-              style={styles.logoBox}
-            >
-              <Text style={styles.logoText}>{APP_NAME.charAt(0)}</Text>
-            </LinearGradient>
+            <Image source={APP_LOGO} style={styles.footerLogoImage} resizeMode="contain" />
             <Text style={styles.footerBrand}>{APP_NAME}</Text>
             <Text style={styles.footerVersion}>VERSION v1.0.0</Text>
           </View>
@@ -357,13 +550,22 @@ export function AccountScreen() {
           </TouchableOpacity>
         </View>
       </ScrollView>
+      </ScreenContainer>
     </SafeAreaView>
   );
 }
 
 // --- Sub-Components ---
 
-const InfoRow = ({ label, value, icon, valueSpacing, iconColor, onPress }) => {
+const InfoRow = ({
+  label,
+  value,
+  icon,
+  valueSpacing,
+  iconColor,
+  onPress,
+  multiline,
+}) => {
   const Container = onPress ? TouchableOpacity : View;
   return (
     <Container 
@@ -374,7 +576,10 @@ const InfoRow = ({ label, value, icon, valueSpacing, iconColor, onPress }) => {
     >
       <View style={styles.infoTextContainer}>
         <Text style={styles.infoLabel}>{label}</Text>
-        <Text style={[styles.infoValue, valueSpacing && { letterSpacing: 4 }]} numberOfLines={1}>
+        <Text
+          style={[styles.infoValue, valueSpacing && { letterSpacing: 4 }]}
+          numberOfLines={multiline ? 2 : 1}
+        >
           {value}
         </Text>
       </View>
@@ -404,6 +609,42 @@ const styles = StyleSheet.create({
     backgroundColor: theme.surface,
     // paddingTop: Platform.OS === "android" ? StatusBar.currentHeight : 0,
   },
+  screenInner: {
+    flex: 1,
+  },
+  guestBody: {
+    flex: 1,
+    paddingHorizontal: 24,
+    paddingTop: 40,
+    alignItems: 'center',
+  },
+  guestLogo: {
+    width: 88,
+    height: 88,
+    marginBottom: 24,
+  },
+  guestTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: theme.onSurface,
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  guestSubtitle: {
+    fontSize: 15,
+    color: theme.onSurfaceVariant,
+    textAlign: 'center',
+    marginBottom: 28,
+    lineHeight: 22,
+  },
+  guestHint: {
+    marginTop: 16,
+    fontSize: 13,
+    color: theme.onSurfaceVariant,
+    textAlign: 'center',
+    lineHeight: 20,
+    paddingHorizontal: 8,
+  },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -417,10 +658,10 @@ const styles = StyleSheet.create({
   headerTitleRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
   },
   headerTitle: {
     fontSize: 20,
+    marginLeft: 8,
     fontWeight: "900",
     color: theme.onSurface,
     letterSpacing: -0.5,
@@ -481,11 +722,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   profileName: {
-    fontSize: 32,
+    fontSize: 28,
     fontWeight: "900",
     color: theme.onSurface,
     marginBottom: 4,
     letterSpacing: -0.5,
+    maxWidth: 280,
   },
   profileSubtitle: {
     fontSize: 14,
@@ -497,9 +739,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     justifyContent: "center",
-    gap: 8,
   },
   goldBadge: {
+    marginRight: 8,
     paddingHorizontal: 12,
     paddingVertical: 6,
     backgroundColor: "rgba(165, 53, 0, 0.1)",
@@ -530,7 +772,6 @@ const styles = StyleSheet.create({
   cardsGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 16,
   },
   cardsGridTablet: {
     justifyContent: "space-between",
@@ -598,7 +839,6 @@ const styles = StyleSheet.create({
   phoneInputRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
     marginTop: 4,
   },
   phoneInput: {
@@ -619,9 +859,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     width: 40,
     height: 40,
+    marginLeft: 8,
   },
   cancelPhoneBtn: {
     backgroundColor: theme.surfaceHigh,
+    marginLeft: 8,
     padding: 10,
     borderRadius: 8,
     justifyContent: 'center',
@@ -635,7 +877,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     justifyContent: "space-between",
-    gap: 12,
     zIndex: 2,
   },
   preferenceItem: {
@@ -682,23 +923,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 24,
   },
-  logoBox: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: theme.primary,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
-    elevation: 4,
+  footerLogoImage: {
+    width: 56,
+    height: 56,
     marginBottom: 12,
-  },
-  logoText: {
-    color: "#ffffff",
-    fontSize: 24,
-    fontWeight: "900",
   },
   footerBrand: {
     fontSize: 18,
@@ -725,5 +953,12 @@ const styles = StyleSheet.create({
     color: theme.onSurfaceVariant,
     fontSize: 14,
     fontWeight: "bold",
+  },
+  profileLoading: {
+    marginBottom: 20,
+    alignItems: 'center',
+  },
+  phoneSaveLoading: {
+    backgroundColor: 'rgba(255,255,255,0.45)',
   },
 });

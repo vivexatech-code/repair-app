@@ -16,7 +16,7 @@ export function MainTabNavigator() {
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarShowLabel: false, // Hide default labels to use custom ones inside tabBarIcon
-        tabBarStyle: styles.tabBar,
+        tabBarStyle: [styles.tabBar, Platform.OS === 'web' && styles.tabBarWeb],
         tabBarIcon: ({ focused }) => {
           let iconName;
           let label;
@@ -34,12 +34,17 @@ export function MainTabNavigator() {
           } else if (route.name === 'Account') {
             iconName = 'person';
             label = 'Account';
+          } else {
+            iconName = 'help-outline';
+            label = String(route.name ?? 'Tab');
           }
+
+          const resolvedIcon = iconName || 'help-outline';
 
           return (
             <View style={[styles.navItem, focused && styles.activeTab]}>
               <Ionicons
-                name={iconName}
+                name={resolvedIcon}
                 size={22}
                 color={focused ? '#ffffff' : colors.textSecondary}
               />
@@ -60,12 +65,20 @@ export function MainTabNavigator() {
 }
 
 const styles = StyleSheet.create({
+  tabBarWeb: {
+    position: 'relative',
+    height: 72,
+    paddingTop: 10,
+    paddingBottom: 10,
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
+  },
   tabBar: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    height: Platform.OS === 'ios' ? 85 : 85,
+    height: Platform.OS === 'ios' ? 85 : 72,
     flexDirection: 'row',
     backgroundColor: 'rgba(255,255,255,0.95)',
     paddingTop: 20,
@@ -86,7 +99,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     minWidth: 60,
   },
-  // Active state for the nav item container
+  
   activeTab: {
     height: 60,
     backgroundColor: colors.primary,

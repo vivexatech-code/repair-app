@@ -20,7 +20,7 @@ export function AboutModalScreen() {
           <Text style={styles.version}>Version 1.0.0</Text>
           <Text style={styles.desc}>
             Repair Series is a modern home services platform for booking trusted
-            technicians for repairs and maintenance.
+            partners for repairs and maintenance.
           </Text>
         </View>
         <Button title="Close" onPress={() => navigation.goBack()} />

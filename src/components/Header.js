@@ -6,6 +6,12 @@ import { spacing } from '../constants/spacing';
 
 export function Header({ title, onBack, right }) {
   const insets = useSafeAreaInsets();
+  const rightNode =
+    typeof right === 'string' || typeof right === 'number' ? (
+      <Text style={styles.rightText}>{right}</Text>
+    ) : (
+      right
+    );
   return (
     <View style={[styles.bar, { paddingTop: insets.top + spacing.sm }]}>
       <View style={styles.side}>
@@ -18,7 +24,7 @@ export function Header({ title, onBack, right }) {
       <Text style={styles.title} numberOfLines={1}>
         {title}
       </Text>
-      <View style={[styles.side, styles.sideRight]}>{right}</View>
+      <View style={[styles.side, styles.sideRight]}>{rightNode}</View>
     </View>
   );
 }
@@ -55,6 +61,10 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 18,
     fontWeight: '700',
+    color: colors.text,
+  },
+  rightText: {
+    fontSize: 14,
     color: colors.text,
   },
 });

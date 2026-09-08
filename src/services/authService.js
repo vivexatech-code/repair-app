@@ -1,54 +1,33 @@
-import {
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-  signOut,
-  sendEmailVerification,
-  updateProfile,
-} from 'firebase/auth';
+import { signOut, deleteUser } from 'firebase/auth';
 import { auth } from './firebase';
+import { deleteCustomerProfile } from './customerService';
+import { mapPhoneAuthError } from '../utils/phoneAuthErrors';
+import { authTimeline } from '../utils/devLog';
 
-export class EmailNotVerifiedError extends Error {
-  constructor() {
-    super('EMAIL_NOT_VERIFIED');
-    this.name = 'EmailNotVerifiedError';
-  }
-}
-
-export async function signUpWithEmail(name, email, password) {
-  const cred = await createUserWithEmailAndPassword(auth, email, password);
-  if (auth.currentUser) {
-    await updateProfile(auth.currentUser, { displayName: name });
-    await sendEmailVerification(auth.currentUser);
-  }
-  return cred.user;
-}
-
-export async function loginWithEmail(email, password) {
-  const cred = await signInWithEmailAndPassword(auth, email, password);
-  await cred.user.reload();
-  if (!cred.user.emailVerified) {
-    await signOut(auth);
-    throw new EmailNotVerifiedError();
-  }
-  return cred.user;
-}
-
-export async function logout() {
+export async function logout(reason = 'user-logout', source = 'authService.logout') {
+  const uid = auth.currentUser?.uid || null;
+  authTimeline('signOut', { source, reason, uid });
   await signOut(auth);
 }
 
-export async function resendVerificationEmail() {
-  if (!auth.currentUser) return;
-  await sendEmailVerification(auth.currentUser);
-}
-
-export async function signInUnverifiedAndResendVerification(email, password) {
-  const cred = await signInWithEmailAndPassword(auth, email, password);
-  await cred.user.reload();
-  if (cred.user.emailVerified) {
-    return { verified: true, user: cred.user };
+export async function deleteAccount() {
+  const user = auth.currentUser;
+  if (!user) {
+    throw new Error('You must be signed in to continue.');
   }
-  await sendEmailVerification(cred.user);
-  await signOut(auth);
-  return { verified: false };
+  authTimeline('deleteUser', {
+    source: 'authService.deleteAccount',
+    reason: 'account-delete',
+    uid: user.uid,
+  });
+  try {
+    await deleteCustomerProfile(user.uid);
+  } catch {
+    /* best effort */
+  }
+  try {
+    await deleteUser(user);
+  } catch (error) {
+    throw new Error(mapPhoneAuthError(error));
+  }
 }

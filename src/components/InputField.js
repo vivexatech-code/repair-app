@@ -2,6 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { colors } from '../constants/colors';
 import { radius, spacing } from '../constants/spacing';
+import { typography } from '../constants/typography';
 
 export function InputField({
   label,
@@ -15,26 +16,35 @@ export function InputField({
   error,
   style,
   inputStyle,
+  rightAdornment,
+  ...rest
 }) {
   return (
     <View style={[styles.wrap, style]}>
       {label ? <Text style={styles.label}>{label}</Text> : null}
-      <TextInput
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        placeholderTextColor={colors.textSecondary}
-        secureTextEntry={secureTextEntry}
-        keyboardType={keyboardType}
-        autoCapitalize={autoCapitalize}
-        multiline={multiline}
-        style={[
-          styles.input,
-          multiline && styles.inputMultiline,
-          error && styles.inputError,
-          inputStyle,
-        ]}
-      />
+      <View style={styles.inputWrap}>
+        <TextInput
+          value={value}
+          onChangeText={onChangeText}
+          placeholder={placeholder}
+          placeholderTextColor={colors.textSecondary}
+          secureTextEntry={secureTextEntry}
+          keyboardType={keyboardType}
+          autoCapitalize={autoCapitalize}
+          multiline={multiline}
+          accessibilityLabel={label || placeholder}
+          accessibilityHint={error || undefined}
+          style={[
+            styles.input,
+            multiline && styles.inputMultiline,
+            error && styles.inputError,
+            rightAdornment && styles.inputWithAdornment,
+            inputStyle,
+          ]}
+          {...rest}
+        />
+        {rightAdornment ? <View style={styles.adornment}>{rightAdornment}</View> : null}
+      </View>
       {error ? <Text style={styles.error}>{error}</Text> : null}
     </View>
   );
@@ -45,7 +55,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   label: {
-    fontSize: 14,
+    ...typography.caption,
     fontWeight: '600',
     color: colors.text,
     marginBottom: spacing.xs,
@@ -56,9 +66,20 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm + 2,
-    fontSize: 16,
+    ...typography.body,
     color: colors.text,
     backgroundColor: colors.surface,
+  },
+  inputWrap: {
+    position: 'relative',
+    justifyContent: 'center',
+  },
+  inputWithAdornment: {
+    paddingRight: 44,
+  },
+  adornment: {
+    position: 'absolute',
+    right: 12,
   },
   inputMultiline: {
     minHeight: 96,
@@ -69,7 +90,7 @@ const styles = StyleSheet.create({
   },
   error: {
     marginTop: spacing.xs,
-    fontSize: 12,
+    ...typography.caption,
     color: colors.error,
   },
 });

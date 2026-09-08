@@ -1,6 +1,5 @@
 import React from 'react';
 import {
-  ActivityIndicator,
   Pressable,
   StyleSheet,
   Text,
@@ -8,6 +7,8 @@ import {
 } from 'react-native';
 import { colors } from '../constants/colors';
 import { radius, spacing } from '../constants/spacing';
+import { typography } from '../constants/typography';
+import { SkeletonLoader } from './SkeletonLoader';
 
 export function Button({
   title,
@@ -25,20 +26,30 @@ export function Button({
     <Pressable
       onPress={onPress}
       disabled={disabled || loading}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: !!(disabled || loading), busy: !!loading }}
       style={({ pressed }) => [
         styles.base,
         isOutline && styles.outline,
         isGhost && styles.ghost,
         !isOutline && !isGhost && styles.primary,
         (disabled || loading) && styles.disabled,
-        pressed && styles.pressed,
+        !disabled && !loading && pressed && styles.pressed,
         style,
       ]}
     >
       <View style={styles.inner}>
         {loading ? (
-          <ActivityIndicator
-            color={isOutline || isGhost ? colors.primary : colors.surface}
+          <SkeletonLoader
+            width={88}
+            height={18}
+            borderRadius={radius.full}
+            style={[
+              styles.loadingBar,
+              isOutline || isGhost
+                ? styles.loadingBarOutline
+                : styles.loadingBarPrimary,
+            ]}
           />
         ) : (
           <Text
@@ -58,7 +69,8 @@ export function Button({
 
 const styles = StyleSheet.create({
   base: {
-    borderRadius: radius.md,
+    borderRadius: radius.lg,
+    minHeight: 52,
     paddingVertical: spacing.sm + 4,
     paddingHorizontal: spacing.lg,
     alignItems: 'center',
@@ -79,15 +91,25 @@ const styles = StyleSheet.create({
     opacity: 0.55,
   },
   pressed: {
-    opacity: 0.88,
+    opacity: 0.92,
+    transform: [{ scale: 0.98 }],
   },
   inner: {
     minHeight: 22,
     justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingBar: {
+    opacity: 0.7,
+  },
+  loadingBarPrimary: {
+    backgroundColor: 'rgba(255,255,255,0.45)',
+  },
+  loadingBarOutline: {
+    backgroundColor: colors.borderStrong,
   },
   text: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...typography.button,
   },
   textPrimary: {
     color: colors.surface,

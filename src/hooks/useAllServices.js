@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { fetchAllServices } from '../services/serviceCatalogService';
+import {
+  fetchAllServices,
+  subscribeAllServices,
+} from '../services/serviceCatalogService';
 
 export function useAllServices() {
   const [services, setServices] = useState([]);
@@ -11,7 +14,7 @@ export function useAllServices() {
     setError(null);
     try {
       const rows = await fetchAllServices();
-      setServices(rows);
+      setServices(Array.isArray(rows) ? rows : []);
     } catch (e) {
       setError(e?.message || 'Could not load services');
     } finally {
@@ -20,7 +23,25 @@ export function useAllServices() {
   }, []);
 
   useEffect(() => {
+    let mounted = true;
+    const unsub = subscribeAllServices(
+      (rows) => {
+        if (!mounted) return;
+        setServices(Array.isArray(rows) ? rows : []);
+        setError(null);
+        setLoading(false);
+      },
+      (e) => {
+        if (!mounted) return;
+        setError(e?.message || 'Could not load services');
+        setLoading(false);
+      },
+    );
     refresh();
+    return () => {
+      mounted = false;
+      unsub?.();
+    };
   }, [refresh]);
 
   return { services, loading, error, refresh };

@@ -1,0 +1,12 @@
+{
+  "name": "repair-series-notify",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Free Vercel serverless push deliverer for Repair Series (Expo Push + optional FCM)",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.0.0"
+  }
+}

@@ -6,12 +6,36 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { subscribeCustomerBookings } from '../services/bookingService';
-import { notifyBookingCompleted } from '../services/notificationService';
-import { BOOKING_STATUS } from '../constants';
 import { useAuth } from './AuthContext';
 
 const BookingsContext = createContext(null);
+const bookingStatusCacheKey = (uid) => `repair_series_booking_status_cache_${uid}`;
+
+async function loadBookingStatusCache(uid) {
+  if (!uid) return { cache: {}, hasPersistedCache: false };
+  try {
+    const raw = await AsyncStorage.getItem(bookingStatusCacheKey(uid));
+    if (!raw) return { cache: {}, hasPersistedCache: false };
+    const parsed = JSON.parse(raw);
+    return {
+      cache: parsed && typeof parsed === 'object' ? parsed : {},
+      hasPersistedCache: true,
+    };
+  } catch {
+    return { cache: {}, hasPersistedCache: false };
+  }
+}
+
+async function saveBookingStatusCache(uid, cache) {
+  if (!uid) return;
+  try {
+    await AsyncStorage.setItem(bookingStatusCacheKey(uid), JSON.stringify(cache));
+  } catch {
+    // best effort only
+  }
+}
 
 export function BookingsProvider({ children }) {
   const { user } = useAuth();
@@ -19,19 +43,47 @@ export function BookingsProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const prevStatusRef = useRef({});
+  const hasSyncedRef = useRef(false);
+  const hasPersistedCacheRef = useRef(false);
+  const [statusCacheReady, setStatusCacheReady] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+
+    if (!user?.uid) {
+      prevStatusRef.current = {};
+      hasSyncedRef.current = false;
+      hasPersistedCacheRef.current = false;
+      setStatusCacheReady(true);
+      return undefined;
+    }
+
+    setStatusCacheReady(false);
+    loadBookingStatusCache(user.uid).then(({ cache, hasPersistedCache }) => {
+      if (!active) return;
+      prevStatusRef.current = cache;
+      hasPersistedCacheRef.current = hasPersistedCache;
+      hasSyncedRef.current = false;
+      setStatusCacheReady(true);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [user?.uid]);
 
   useEffect(() => {
     if (!user?.uid) {
       setBookings([]);
       setLoading(false);
-      prevStatusRef.current = {};
       return undefined;
     }
+    if (!statusCacheReady) return undefined;
     setLoading(true);
     const unsub = subscribeCustomerBookings(
       user.uid,
       (rows) => {
-        setBookings(rows);
+        setBookings(Array.isArray(rows) ? rows : []);
         setLoading(false);
         setError(null);
       },
@@ -41,26 +93,49 @@ export function BookingsProvider({ children }) {
       },
     );
     return unsub;
-  }, [user?.uid]);
+  }, [statusCacheReady, user?.uid]);
 
   useEffect(() => {
+    if (!user?.uid || !statusCacheReady) return;
+
     const prev = prevStatusRef.current;
     const next = { ...prev };
-    bookings.forEach((b) => {
-      const id = b.id;
-      const was = prev[id];
-      const now = b.status;
-      if (
-        was !== undefined &&
-        was !== BOOKING_STATUS.COMPLETED &&
-        now === BOOKING_STATUS.COMPLETED
-      ) {
-        notifyBookingCompleted(b.bookingCode || id).catch(() => {});
+
+    const syncNotifications = async () => {
+      try {
+        bookings.forEach((b) => {
+          const id = b?.id;
+          if (!id) return;
+          next[id] = b?.status;
+        });
+
+        prevStatusRef.current = next;
+        hasPersistedCacheRef.current = true;
+        hasSyncedRef.current = true;
+        await saveBookingStatusCache(user.uid, next);
+      } catch {
+        /* avoid crash if storage or mapping fails */
       }
-      next[id] = now;
-    });
-    prevStatusRef.current = next;
-  }, [bookings]);
+    };
+
+    if (!hasSyncedRef.current) {
+      syncNotifications();
+      return;
+    }
+
+    try {
+      bookings.forEach((b) => {
+        const id = b?.id;
+        if (!id) return;
+        next[id] = b?.status;
+      });
+
+      prevStatusRef.current = next;
+      saveBookingStatusCache(user.uid, next).catch(() => {});
+    } catch {
+      /* ignore */
+    }
+  }, [bookings, statusCacheReady, user?.uid]);
 
   const value = useMemo(
     () => ({ bookings, loading, error }),
